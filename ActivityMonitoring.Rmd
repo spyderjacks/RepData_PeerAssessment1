@@ -1,0 +1,306 @@
+---
+title: "Reproducible Research: Peer Assessment 1"
+output: 
+  html_document:
+    keep_md: true
+---
+
+This assignment review activity data from a personal monitoring device. This device collects data at 5 minute intervals through out the day. The data consists of two months of data from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5 minute intervals each day.
+
+The dataset was taken from https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip at 8PM EST on 11 June 2015.
+## Loading and preprocessing the data
+
+```{r}
+setwd("C:/Users/msydor/Documents/05 Reproducible Research/PeerAssessment-1")
+activity <- read.csv("activity.csv",header=TRUE, sep=",")
+head(activity)
+summary(activity)
+```
+
+The dataset is effectively a concatenation of daily sampling, at 5 minute intervals, over a two month period.
+
+## What is mean total number of steps taken per day?
+
+For this part of the assignment, we can ignore the missing values in the dataset.
+ 
+ 1. Calculate the total number of steps taken per day
+ 
+ To achieve this I elected to use a script (dailySummary.R) to do the sums for each day:
+ 
+```{r}
+dailySummary <- function(df) {
+      total = 0
+      for (i in 1:nrow(df)) {
+            total = total + df[i,1]
+      }
+      return( total )
+}
+```
+This script, in conjunction with a subsetting by date, takes advantage of the repeated date, to organize the sum.  
+```{r}
+ dailySteps <- by(activity, activity$date, dailySummary)
+ head(dailySteps)
+```
+This form of the result, as an 'atomic vector' can be made more convenient for use by converting to a matrix:
+```{r}
+dailyTotalSteps <- matrix(dailySteps)
+```
+
+
+2. Make a histogram of the total number of steps taken each day
+
+The matrix form is used to feed the histogram plot.
+
+```{r}
+hist(dailyTotalSteps, breaks=1000, main="Histogram of dailySteps (ds2)")
+```
+
+3. Calculate and report the mean and median of the total number of steps taken per day
+
+First we need to convert the missing values (na) to zero.
+
+```{r}
+dailyTotalSteps[is.na(dailyTotalSteps)] <- 0
+dailyTotalStepsMEAN <- mean(dailyTotalSteps)
+dailyTotalStepsMEDIAN <- median(dailyTotalSteps)
+```
+
+While we have this result, it might be interesting to look at the overall pattern of Total Steps for the study:
+
+First, I want to reorganize the data
+To meet this goal, and also looking ahead at the next questions, I implemented a script to re-organize the data into a dataframe where each day's data were in a separate column.
+
+```{r}
+# build dataframe from mulitple csv files
+#
+# the name of the new column will be taken from the name of the individual file
+#
+# expecting "steps", "date", "interval"
+#
+# column_for_index :: interval
+# column_for_data :: steps
+#
+
+build_dataframe <- function( target_dir, target_file, column_as_index, column_for_data) {
+      # get list of files in target directory
+      #
+      listOfFiles = dir(target_dir)
+      setwd(target_dir)
+      
+      # initialize the dataframe df
+      #
+      # read the data
+      #
+      ref <- read.csv(target_file, header=TRUE, sep=",")
+      targetRows <- nrow(ref)
+      df <- ref[column_as_index]
+      
+      for (name in listOfFiles) {
+            
+            # read the data
+            #
+            tmp <- read.csv(name, header=TRUE, sep=",")
+            
+            # rename the data column with the file used
+            #
+            names(tmp)[column_for_data] <- paste(name,"steps",sep="-")
+            
+            # append the new data column to the dataframe
+            #
+            df <- cbind(df,tmp[column_for_data])
+      }
+
+# restore working directory
+#
+setwd("../")
+
+return(df)
+}
+```
+
+Now we can build the dataframe. First we will subset the data into individual files with which build_dataframe may assemble as intended.
+
+```{r}
+activity3 =  read.csv("activity.csv",header=TRUE, sep=",")
+##Get the list of unique dates
+for (name in levels(activity3$date)){
+      
+      #Subset the data by date
+      #
+      tmp=subset(activity,date==name)
+      
+      #Create a new filename for each date - the folder 'activity_divided' should already exist
+      #
+      fn=paste('activity_divided/',gsub(' ','',name),sep='')
+      
+      #Save the CSV file containing separate  data for each unique date
+      #
+      write.csv(tmp,fn,row.names=FALSE)
+}
+```
+
+Now we run the script.  We will use the tail() to confirm the data organization as the head() catches too many zero/NA values.
+
+```{r}
+big_table <- build_dataframe("./activity_divided", "2012-10-01",3,1)
+tail(big_table)
+```
+
+We have the mean values as a single column from the dailySummary script.  We will build a data frame with this column as well as the dates (individual days), which we can extract from the column names of big_table, skipping the first column (titled "interval").  We also need to adjust the length of the mean vector, which is 1 greater than the number of dates available.  We will also rename the ds2 column as "mean", and then complete the plot.
+
+```{r}
+study_dates <- names(big_table[2:61])
+dailyTotalSteps <- cbind(as.data.frame(study_dates),dailyTotalSteps[1:60,])
+colnames(dailyTotalSteps)[2] <- "Sum"
+head(dailyTotalSteps)
+
+library(lattice)
+p <- xyplot(Sum ~ study_dates, data = dailyTotalSteps, type = "l")
+print(p)
+```
+
+I can't see any real pattern there... but there are a couple of missing periods where there was no activity.
+
+The motivation for the big_table dataframe was to make a survey of the data.  This is accomplished with the tableplot() from the tabplot package.
+
+```{r,echo=FALSE,results="hide"}
+library(tabplot)
+```
+
+```{r}
+tableplot(big_table)
+```
+
+
+We can see roughly that there are two periods per day where activity is peaking,: morning and evening with sporadic activity during the day.  It also appears that there was sporadic activity in October late evenings that did not appear for November.
+
+
+## What is the average daily activity pattern?
+
+Make a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis)
+
+
+```{r}
+big_table2 <- big_table
+big_table2[is.na(big_table2)] <- 0
+dailyMeansByRow <- rowMeans(big_table2[,2:62])
+dailyMeansByRow[is.na(dailyMeansByRow)] <- 0
+
+plot(dailyMeansByRow, type="l")
+```
+
+ The peak activity appears to be around 8:30 AM (100 intervals of 5 min)
+
+
+ 1. Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?
+
+We can find the max vlue as follows:
+```{r}
+max(dailyMeansByRow)
+```
+
+To find the corresponding row we use the following function:
+```{r}
+findrow <- function (d,x) { 
+      for(i in 1:length(d)) { 
+            if( d[i] >= x) {
+                  print(i)
+            }
+      }
+return(0)
+}
+```
+
+The function gives the row...
+
+```{r}
+findrow(dailyMeansByRow, 179.1)
+```
+... which we then use as an index to confirm.
+```{r}
+dailyMeansByRow[104]
+```
+
+
+## Imputing missing values
+
+There are a number of days/intervals where there are missing values (coded as NA). The presence of missing days may introduce bias into some calculations or summaries of the data.
+
+1. Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NAs)
+
+We go back to the original dataset and look at the summary():
+```{r}
+summary(activity)
+```
+
+The NA's are indicated at 2304.  A quick calculation indicates the percentage of about `r round((2305/17568)*100)`% missing data:
+```{r}
+nrow(activity)
+(2305/17568)*100
+```
+
+
+ 2. Devise a strategy for filling in all of the missing values in the dataset. The strategy does not need to be sophisticated. For example, you could use the mean/median for that day, or the mean for that 5-minute interval, etc.
+ 
+As the big_table dataframe is organized for 5-minute intervals, it will be straightforward to use the mean 
+of each 5 min interval as an approximation for the missing values.  we can repeat the conversion from 
+activity to big_table and restoe the original NA values.
+
+```{r}
+intervalMeans <- rowMeans(big_table, na.rm = TRUE, dims = 1 )
+head(intervalMeans)
+```
+We should round the values for good measure.
+```{r}
+intervalMeans <- round(intervalMeans)
+head(intervalMeans)
+hist(intervalMeans)
+```
+ 
+
+ 3. Create a new dataset that is equal to the original dataset but with the missing data filled in.
+
+We need a function to detect the NA values and substitute the mean, for the particular 5 min interval encountered.
+
+```{r}
+imputValues <- function(d,means) {
+
+      for (j in 1:61) {
+            for (i in 1:288) {
+                  index <- i+((j-1)*288)
+                  if( is.na(d[index,1])) {
+                        d[index,1] = means[i]
+                  }
+            }
+            
+      }
+      return( d )
+}
+```
+
+```{r}
+activity4 <- imputValues(activity, intervalMeans)
+write.csv(activity4, file="activity_imputed.csv")
+```
+
+ 4. Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day. Do these values differ from the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
+ 
+```{r}
+dailyStepsImputed <- by(activity4, activity4$date, dailySummary)
+dailyTotalStepsImputed <- matrix(dailyStepsImputed)
+hist(dailyTotalStepsImputed, breaks=1000, main="Histogram of dailyStepsImputed")
+mean(dailyTotalStepsImputed)
+median(dailyTotalStepsImputed)
+```
+
+Comparing with the original mean of `r dailyTotalStepsMEAN` and median of `r dailyTotalStepsMEDIAN` , the imputed results are a bit different (greater).  I'm not sure what to make of than.  The distribution is not too bad, with the exception thatlarger step quanties are not a bit higer (spike around 16,000)
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+For this part the weekdays() function may be of some help here. Use the dataset with the filled-in missing values for this part.
+
+1. Create a new factor variable in the dataset with two levels – “weekday” and “weekend” indicating whether a given date is a weekday or weekend day.
+
+2. Make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis). See the README file in the GitHub repository to see an example of what this plot should look like using simulated data.
+    
+    
